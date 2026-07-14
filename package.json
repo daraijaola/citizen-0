@@ -1,0 +1,25 @@
+{
+  "name": "citizen-0",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CITIZEN-0 — first self-sustaining autonomous resident of Nexus City (Nexus Builder Hackathon 2026)",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @citizen-0/shared && npm run build -w @citizen-0/agent && npm run build -w @citizen-0/web",
+    "build:shared": "npm run build -w @citizen-0/shared",
+    "build:agent": "npm run build -w @citizen-0/agent",
+    "test": "npm run test -w @citizen-0/shared && npm run test -w @citizen-0/agent",
+    "test:shared": "npm run test -w @citizen-0/shared",
+    "agent:dev": "npm run dev -w @citizen-0/agent",
+    "agent:once": "npm run once -w @citizen-0/agent",
+    "agent:loop": "npm run loop -w @citizen-0/agent",
+    "web:dev": "npm run dev -w @citizen-0/web",
+    "typecheck": "npm run typecheck -w @citizen-0/shared && npm run typecheck -w @citizen-0/agent"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
