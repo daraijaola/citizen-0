@@ -89,8 +89,23 @@ export class MockPlotAdapter implements PlotPort {
     this.solLamports += amount;
   }
 
+  async debitLamports(amount: bigint, _reason: string): Promise<void> {
+    if (this.solLamports < amount) {
+      throw new Error(
+        `Mock plot: insufficient balance to debit ${amount} (have ${this.solLamports})`,
+      );
+    }
+    this.solLamports -= amount;
+  }
+
   /** Sync balance from AgenC adapter after settlement (mock world). */
   setBalance(lamports: bigint): void {
     this.solLamports = lamports;
+  }
+
+  /** Act 2: second plot registry entry (narrated ownership). */
+  addSecondPlot(plot: PlotRegistryEntry): void {
+    // kept for API symmetry; primary plot remains canonical for tax
+    void plot;
   }
 }

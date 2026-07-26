@@ -33,10 +33,10 @@ export interface IntentLimits {
 }
 
 export const DEFAULT_LIMITS: IntentLimits = {
-  maxSpendPerTxLamports: 50_000_000n, // 0.05 SOL
-  maxSpendPerDayLamports: 200_000_000n, // 0.2 SOL
-  maxOpenClaims: 2,
-  maxJobClaimRewardLamports: 100_000_000n, // 0.1 SOL
+  maxSpendPerTxLamports: 100_000_000n, // 0.1 SOL (firm child escrows)
+  maxSpendPerDayLamports: 500_000_000n, // 0.5 SOL
+  maxOpenClaims: 4,
+  maxJobClaimRewardLamports: 200_000_000n, // 0.2 SOL
   allowedCounterparties: [
     // AgenC coordination program (mainnet)
     "HJsZ53Zb27b8QMRbQpuDngE44AdwCGxvEZr61Zmxw1xK",
@@ -51,7 +51,7 @@ export const DEFAULT_LIMITS: IntentLimits = {
  */
 export const CHARTER = {
   agent: "CITIZEN-0",
-  version: "1.0.0",
+  version: "1.1.0",
   philosophy:
     "Bounded autonomy: the agent proposes, policy signs, chain settles. No unilateral spend.",
 
@@ -62,6 +62,10 @@ export const CHARTER = {
     "Execute claimed job work offline (LLM / deterministic workers)",
     "Propose SUBMIT_DELIVERABLE with artifact hash + URI",
     "Propose PAY_TAX when balance covers the published obligation",
+    "Act 2: unlock firm mode when coverage ≥ 3× next obligation",
+    "Act 2: POST_JOB child subtasks and HIRE_WORKER under spend limits",
+    "Act 2: keep disclosed margin after child escrow settlement",
+    "Act 3: fund worker citizens (CITIZEN-1/2) with seed capital from surplus",
     "Append all decisions to the hash-chained audit log",
     "Narrate material events to the public diary channel",
   ],
@@ -75,6 +79,8 @@ export const CHARTER = {
     "Seize, transfer, or modify plot ownership outside city rules",
     "Fabricate audit log entries or break the hash chain",
     "Auto-approve its own intents (signer must be a separate boundary)",
+    "Spawn society before firm mode is unlocked",
+    "Pay worker wages outside posted child-escrow rewards",
   ],
 
   intentKinds: [
@@ -200,12 +206,16 @@ export function evaluateIntent(
     reasons.push("zero-value transfer");
   }
 
-  // Act 2/3 kinds denied until charter upgrade
-  if (intent.kind === "HIRE_WORKER" || intent.kind === "BUY_PLOT") {
-    // Allow BUY_PLOT only if explicitly under spend limits (still permitted path)
-    if (intent.kind === "HIRE_WORKER") {
-      reasons.push("HIRE_WORKER not enabled in charter v1 (Act 2 stretch)");
-    }
+  // Act 2/3: allow HIRE_WORKER / BUY_PLOT / POST_JOB when firmMode flagged in payload
+  if (
+    (intent.kind === "HIRE_WORKER" ||
+      intent.kind === "BUY_PLOT" ||
+      intent.kind === "POST_JOB") &&
+    intent.payload["firmMode"] !== true &&
+    intent.payload["act"] !== "PROSPERITY" &&
+    intent.payload["act"] !== "SOCIETY"
+  ) {
+    reasons.push(`${intent.kind} requires firmMode/act flag (Act 2+)`);
   }
 
   if (reasons.length > 0) {

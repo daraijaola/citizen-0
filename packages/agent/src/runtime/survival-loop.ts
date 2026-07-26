@@ -8,6 +8,7 @@
  *
  * Phase 2: specialized workers, self-QA, retries, circuit breakers.
  * Phase 3: first-person diary + optional admin intent visibility/gate.
+ * Phase 4–5: firm mode (subcontract) + society (CITIZEN-1/2).
  */
 
 import { randomUUID } from "node:crypto";
@@ -16,6 +17,8 @@ import {
   pickBestJob,
   policyFor,
   computeRunway,
+  isLargeJob,
+  WORKER_SEED_BALANCE,
   type AgencPort,
   type CitizenState,
   type IntentProposal,
@@ -34,6 +37,9 @@ import type { DiaryService } from "../diary/service.js";
 import { Narrator, voiceCtx } from "../diary/narrator.js";
 import type { AdminGate } from "./admin-gate.js";
 import { NoopAdminGate } from "./admin-gate.js";
+import { runFirmJob } from "./firm-engine.js";
+import { EconomyState, preferFirmJob } from "./economy-mixin.js";
+import type { MockAgencAdapter } from "../adapters/mock-agenc.js";
 
 export interface SurvivalLoopDeps {
   mode: RuntimeMode;
@@ -72,6 +78,7 @@ export class SurvivalLoop {
   private openJobs: JobListing[] = [];
   private agentPda?: string;
   private booted = false;
+  private readonly economy = new EconomyState();
 
   constructor(deps: SurvivalLoopDeps) {
     this.mode = deps.mode;
@@ -80,7 +87,8 @@ export class SurvivalLoop {
     this.signer = deps.signer;
     this.log = deps.log;
     this.citizenId = deps.citizenId ?? "CITIZEN-0";
-    this.capabilities = deps.capabilities ?? CAPABILITY.COMPUTE;
+    // Mainnet open tasks often require GENERAL (2) or COMPUTE (1)
+    this.capabilities = deps.capabilities ?? CAPABILITY.ALL;
     this.diary = deps.diary;
     this.adminGate = deps.adminGate ?? new NoopAdminGate();
     this.claimBreaker = new CircuitBreaker({
@@ -112,49 +120,71 @@ export class SurvivalLoop {
     this.log.append({
       type: "BOOT",
       atMs: Date.now(),
-      summary: `${this.citizenId} boot mode=${this.mode} phase=3`,
+      summary: `${this.citizenId} boot mode=${this.mode} phase=4-5`,
       data: {
         mode: this.mode,
         capabilities: this.capabilities.toString(),
         agencMode: this.agenc.mode,
         plotMode: this.plot.mode,
+        acts: "SURVIVAL|PROSPERITY|SOCIETY",
         charter: "v1.0.0",
-        phase: 3,
+        phase: "4-5",
         diary: Boolean(this.diary),
         telegram: this.diary?.telegramEnabled ?? false,
       },
     });
 
-    if (this.agenc.mode === "mock" || this.mode === "mock") {
-      const reg = await withRetry(
-        () =>
-          this.agenc.ensureRegistered({
-            capabilities: this.capabilities,
-            endpoint: "https://citizen-0.local/agent",
-            stakeLamports: 10_000_000n,
-          }),
-        {
-          maxAttempts: 3,
-          onRetry: (attempt, err, delay) => {
-            this.log.append({
-              type: "RETRY",
-              atMs: Date.now(),
-              summary: `Register retry ${attempt}: ${err.message}`,
-              data: { delay, code: err.code },
-            });
+    // Register for mock always; for live when mockMutations hybrid is on
+    // (LIVE_MUTATIONS=0) so claim/work path can run. Pure on-chain register
+    // only when LIVE_MUTATIONS=1 (may throw if not fully wired).
+    const shouldRegister =
+      this.agenc.mode === "mock" ||
+      this.mode === "mock" ||
+      this.mode === "live";
+    if (shouldRegister) {
+      try {
+        const reg = await withRetry(
+          () =>
+            this.agenc.ensureRegistered({
+              capabilities: this.capabilities,
+              endpoint: "https://citizen-0.local/agent",
+              stakeLamports: 10_000_000n,
+            }),
+          {
+            maxAttempts: 3,
+            onRetry: (attempt, err, delay) => {
+              this.log.append({
+                type: "RETRY",
+                atMs: Date.now(),
+                summary: `Register retry ${attempt}: ${err.message}`,
+                data: { delay, code: err.code },
+              });
+            },
           },
-        },
-      );
-      this.agentPda = reg.agentPda;
-      this.log.append({
-        type: "PERCEPTION",
-        atMs: Date.now(),
-        summary: `Registered agent ${reg.agentPda}`,
-        data: {
-          agentPda: reg.agentPda,
-          stakeLamports: reg.stakeLamports.toString(),
-        },
-      });
+        );
+        this.agentPda = reg.agentPda;
+        this.log.append({
+          type: "PERCEPTION",
+          atMs: Date.now(),
+          summary: `Registered agent ${reg.agentPda}`,
+          data: {
+            agentPda: reg.agentPda,
+            authority: reg.authority,
+            stakeLamports: reg.stakeLamports.toString(),
+            agencMode: this.agenc.mode,
+          },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.log.append({
+          type: "ERROR",
+          atMs: Date.now(),
+          summary: `Register skipped/failed: ${msg}`,
+          data: { mode: this.mode },
+        });
+        // Live pure-on-chain may not be fully wired yet — continue for discover/balance
+        if (this.mode !== "live") throw err;
+      }
     }
 
     const state = await this.snapshot();
@@ -182,11 +212,19 @@ export class SurvivalLoop {
     const obligation = await this.plot.refresh(now);
     const runway = computeRunway(balances.solLamports, obligation, now);
 
+    const authorityWallet =
+      "authorityPubkey" in this.agenc &&
+      typeof (this.agenc as { authorityPubkey?: string }).authorityPubkey ===
+        "string"
+        ? (this.agenc as { authorityPubkey: string }).authorityPubkey
+        : undefined;
+
     return {
       identity: {
         citizenId: this.citizenId,
         displayName: "CITIZEN-0",
         agentPda: this.agentPda,
+        authorityWallet,
         mode: this.mode,
         createdAtMs: now,
       },
@@ -198,6 +236,10 @@ export class SurvivalLoop {
       attempts: [...this.attempts],
       lastTickAtMs: now,
       tickCount: this.tickCount,
+      economy: this.economy.snapshot(
+        runway.coverageRatio,
+        runway.solvency,
+      ),
     };
   }
 
@@ -218,6 +260,102 @@ export class SurvivalLoop {
 
     const policy = policyFor(state.runway.solvency);
     actions.push(`solvency=${state.runway.solvency}`);
+
+    // Act 2: firm unlock (mock path only — live has no postJob employer surface yet)
+    if (
+      this.agenc.mode !== "live" &&
+      this.economy.tryUnlockFirm(
+        state.runway.coverageRatio,
+        state.runway.solvency,
+      )
+    ) {
+      this.log.append({
+        type: "FIRM_UNLOCK",
+        atMs: Date.now(),
+        summary: `Firm mode unlocked coverage=${state.runway.coverageRatio.toFixed(2)}`,
+        data: { coverage: state.runway.coverageRatio },
+      });
+      await this.diary?.write(
+        Narrator.firmUnlock(state.runway.coverageRatio),
+      );
+      actions.push("firm_unlock");
+      // Ensure a firm-sized job exists in mock
+      if (this.agenc.seedFirmJob) {
+        try {
+          await this.agenc.seedFirmJob(30_000_000n);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    // Act 3: spawn society when flush after firm
+    if (!this.economy.societySpawned) {
+      const born = this.economy.trySpawnSociety(state.runway.coverageRatio);
+      if (born) {
+        const seedCost = WORKER_SEED_BALANCE * BigInt(born.length);
+        try {
+          await this.plot.debitLamports?.(seedCost, "society-seed");
+          if (typeof (this.agenc as MockAgencAdapter).debitLamports === "function") {
+            (this.agenc as MockAgencAdapter).debitLamports(
+              seedCost,
+              "society-seed",
+            );
+          }
+        } catch {
+          /* seed from narrative surplus if debit fails */
+        }
+        this.log.append({
+          type: "SOCIETY_SPAWN",
+          atMs: Date.now(),
+          summary: `Spawned ${born.map((b) => b.citizenId).join(",")}`,
+          data: {
+            ids: born.map((b) => b.citizenId),
+            seed: seedCost.toString(),
+          },
+        });
+        await this.diary?.write(
+          Narrator.societySpawn(born.map((b) => b.citizenId)),
+        );
+        actions.push("society_spawn");
+      }
+    }
+
+    // Act 3: worker tax ticks
+    if (this.economy.societySpawned) {
+      this.economy.tickWorkers(now);
+      const taxes = this.economy.collectWorkerTaxes(now);
+      for (const t of taxes) {
+        this.log.append({
+          type: "WORKER_TAX",
+          atMs: Date.now(),
+          summary: `${t.id} paid tax ${t.amount}`,
+          data: { id: t.id, amount: t.amount.toString() },
+        });
+        await this.diary?.write(
+          Narrator.workerTax(t.id, Number(t.amount) / 1e9),
+        );
+        actions.push(`worker_tax=${t.id}`);
+      }
+    }
+
+    // Act 2: second plot once firm has margin and not yet purchased
+    if (
+      this.economy.firmUnlocked &&
+      !this.economy.firmPnL.secondPlotPurchased &&
+      this.economy.firmPnL.parentJobsCompleted >= 1 &&
+      state.runway.coverageRatio >= 3.5
+    ) {
+      const plot = this.economy.buySecondPlot();
+      this.log.append({
+        type: "SECOND_PLOT",
+        atMs: Date.now(),
+        summary: `Second plot ${plot.plotId}`,
+        data: { plotId: plot.plotId },
+      });
+      await this.diary?.write(Narrator.secondPlot(plot.plotId));
+      actions.push("second_plot");
+    }
 
     // Diary heartbeat every tick (short status)
     if (this.tickCount === 1 || this.tickCount % 3 === 0) {
@@ -310,12 +448,26 @@ export class SurvivalLoop {
         actions.push("circuit_open");
       } else {
         const nowUnix = Math.floor(Date.now() / 1000);
-        const pick = pickBestJob(
+        const firmPick = preferFirmJob(
           this.openJobs,
-          policy,
-          this.capabilities,
-          nowUnix,
+          this.economy.firmUnlocked,
         );
+        const pick = firmPick
+          ? {
+              job: firmPick,
+              score: {
+                jobId: firmPick.id,
+                score: Number(firmPick.rewardLamports) / 1e9,
+                reasons: ["firm_prefer"],
+                eligible: true,
+              },
+            }
+          : pickBestJob(
+              this.openJobs,
+              policy,
+              this.capabilities,
+              nowUnix,
+            );
 
         if (pick) {
           this.log.append({
@@ -328,17 +480,28 @@ export class SurvivalLoop {
               score: pick.score.score,
               reasons: pick.score.reasons,
               rewardLamports: pick.job.rewardLamports.toString(),
+              firm:
+                this.economy.firmUnlocked &&
+                (isLargeJob(pick.job) || pick.job.firmEligible),
             },
           });
 
           try {
-            const worked = await this.proposeClaimAndWork(
-              pick.job,
-              openClaims,
-            );
+            const useFirm =
+              this.economy.firmUnlocked &&
+              (isLargeJob(pick.job) || Boolean(pick.job.firmEligible)) &&
+              Boolean(this.agenc.postJob);
+
+            const worked = useFirm
+              ? await this.proposeFirmJob(pick.job)
+              : await this.proposeClaimAndWork(pick.job, openClaims);
             if (worked) {
               this.claimBreaker.recordSuccess();
-              actions.push(`job_settled=${pick.job.id}`);
+              actions.push(
+                useFirm
+                  ? `firm_settled=${pick.job.id}`
+                  : `job_settled=${pick.job.id}`,
+              );
             }
           } catch (err) {
             this.claimBreaker.recordFailure();
@@ -371,6 +534,96 @@ export class SurvivalLoop {
       actions,
       state,
     };
+  }
+
+  private async proposeFirmJob(job: JobListing): Promise<boolean> {
+    // Ensure at least two workers exist for hire narrative (society may lag)
+    if (this.economy.workers.length === 0) {
+      // temporary hire pool — society will formalize later
+      const born = this.economy.trySpawnSociety(99);
+      if (born) {
+        await this.diary?.write(
+          Narrator.societySpawn(born.map((b) => b.citizenId)),
+        );
+      }
+    }
+
+    const hireIntent = this.makeIntent({
+      kind: "HIRE_WORKER",
+      rationale: `Firm mode: decompose and subcontract "${job.title}"`,
+      confidence: 0.9,
+      spendLamports: 0n,
+      counterparty: AGENC_MAINNET.programId,
+      subjectId: job.id,
+      payload: {
+        firmMode: true,
+        act: "PROSPERITY",
+        rewardLamports: job.rewardLamports.toString(),
+      },
+    });
+    this.log.recordIntentProposed(hireIntent);
+    const decision = this.signer.evaluate(hireIntent, { openClaimCount: 0 });
+    this.log.recordIntentDecided(decision);
+    if (decision.status !== "APPROVED") {
+      this.attempts.push({
+        jobId: job.id,
+        status: "declined",
+        error: decision.reasons.join("; "),
+        firmMode: true,
+      });
+      return false;
+    }
+
+    const result = await runFirmJob({
+      job,
+      agenc: this.agenc,
+      log: this.log,
+      workers: this.economy.workers,
+      onWorkerPay: (id, lamports) => this.economy.payWorker(id, lamports),
+      onDebitParent: async (lamports, reason) => {
+        if (typeof (this.agenc as MockAgencAdapter).debitLamports === "function") {
+          (this.agenc as MockAgencAdapter).debitLamports(lamports, reason);
+        }
+        await this.plot.debitLamports?.(lamports, reason);
+      },
+    });
+
+    this.economy.recordFirmJob({
+      gross: result.parentRewardLamports,
+      paidWorkers: result.paidToWorkersLamports,
+      margin: result.marginLamports,
+    });
+    this.economy.recordChildrenHired(result.childJobIds.length);
+
+    // Credit parent settlement into plot ledger
+    await this.plot.creditLamports?.(
+      result.parentRewardLamports,
+      `firm:${job.id}`,
+    );
+
+    this.attempts.push({
+      jobId: job.id,
+      status: "settled",
+      claimedAtMs: Date.now(),
+      settledAtMs: Date.now(),
+      rewardLamports: result.parentRewardLamports,
+      artifactSha256: result.proofHashHex,
+      resultUri: result.resultUri,
+      firmMode: true,
+      childJobIds: result.childJobIds,
+      marginLamports: result.marginLamports,
+      paidToWorkersLamports: result.paidToWorkersLamports,
+    });
+
+    await this.diary?.write(
+      Narrator.firmJob(
+        job.title,
+        result.childJobIds.length,
+        Number(result.marginLamports) / 1e9,
+        Number(result.paidToWorkersLamports) / 1e9,
+      ),
+    );
+    return true;
   }
 
   private async proposeAndPayTax(state: CitizenState): Promise<boolean> {
@@ -697,20 +950,25 @@ export class SurvivalLoop {
       this.patchAttempt(attempt);
       this.log.recordJobStatus(attempt);
 
-      await this.plot.creditLamports?.(
-        settlement.rewardLamports,
-        `settlement:${job.id}`,
-      );
+      // Live path: reward often 0 here — SOL lands in wallet; snapshot syncs chain balance.
+      // Mock path: credit plot ledger so runway updates immediately.
+      if (settlement.rewardLamports > 0n) {
+        await this.plot.creditLamports?.(
+          settlement.rewardLamports,
+          `settlement:${job.id}`,
+        );
+      }
 
       this.log.append({
         type: "INTENT_EXECUTED",
         atMs: Date.now(),
-        summary: `Settled job ${job.id} +${settlement.rewardLamports} lamports`,
+        summary: `Settled job ${job.id} +${settlement.rewardLamports} lamports (mode=${this.agenc.mode})`,
         data: {
           rewardLamports: settlement.rewardLamports.toString(),
           txSignature: settlement.txSignature,
           worker: deliverable.kind,
           engine: deliverable.engine,
+          agencMode: this.agenc.mode,
         },
       });
       {
@@ -719,12 +977,36 @@ export class SurvivalLoop {
           Narrator.jobSettled(
             await this.ctxFromState(st),
             job.title,
-            settlement.rewardLamports,
+            settlement.rewardLamports > 0n
+              ? settlement.rewardLamports
+              : job.rewardLamports,
             `${deliverable.kind}/${deliverable.engine}`,
           ),
         );
       }
       return true;
+    }
+
+    // Submitted on-chain, awaiting creator accept / auto-accept
+    if (settlement?.status === "pending" || this.agenc.mode === "live") {
+      this.log.append({
+        type: "JOB_STATUS",
+        atMs: Date.now(),
+        summary: `Submitted live — pending review ${job.id}`,
+        data: {
+          jobId: job.id,
+          txSignature: settlement?.txSignature,
+          status: settlement?.status ?? "submitted",
+        },
+      });
+      await this.diary?.write(
+        Narrator.jobClaimed(
+          await this.ctxFromState(await this.snapshot()),
+          `[submitted/pending] ${job.title}`,
+          job.rewardLamports,
+        ),
+      );
+      return true; // progress without full settlement yet
     }
 
     return false;

@@ -10,16 +10,14 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { bootstrapCitizen } from "./bootstrap.js";
-import { loadEnvFile } from "./load-env.js";
 import { Supervisor } from "./runtime/supervisor.js";
 
 async function main(): Promise<void> {
-  loadEnvFile();
   const cmd = process.argv[2] ?? "once";
   const { loop, log, mode, diary, dataDir } = bootstrapCitizen();
 
   console.log(`\n╔══════════════════════════════════════╗`);
-  console.log(`║  CITIZEN-0  ·  mode=${mode.padEnd(6)}  p3    ║`);
+  console.log(`║  CITIZEN-0  ·  mode=${mode.padEnd(6)}  p4-5  ║`);
   console.log(`╚══════════════════════════════════════╝`);
   console.log(
     `  diary: on · telegram: ${diary?.telegramEnabled ? "on" : "off (file+console)"} · admin: ${diary?.adminEnabled ? "on" : "off"}\n`,

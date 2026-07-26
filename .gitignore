@@ -21,3 +21,9 @@ finish-phase3.sh
 agent-cron.log
 data-test*/
 .citizen0/
+
+# runtime + local artifacts
+wallets/
+*.broken.bak
+.agent.lock
+deploy-phase45.sh

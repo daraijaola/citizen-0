@@ -29,16 +29,22 @@ export function resolveDataDir(explicit?: string): string {
 }
 
 export function bootstrapCitizen(opts: BootstrapOptions = {}) {
-  const mode: RuntimeMode =
+  const rawMode = (
     opts.mode ??
-    ((process.env.CITIZEN_MODE as RuntimeMode | undefined) || "mock");
+    (process.env.CITIZEN_MODE as string | undefined) ??
+    "mock"
+  ).toLowerCase();
+
+  // hybrid → live (real wallet + discover; mutations mock unless LIVE_MUTATIONS=1)
+  const mode: RuntimeMode =
+    rawMode === "live" || rawMode === "hybrid" ? "live" : "mock";
 
   const starting =
     opts.startingBalanceLamports ??
     BigInt(
       process.env.STARTING_BALANCE_SOL
-        ? Number(process.env.STARTING_BALANCE_SOL) * 1e9
-        : 30_000_000,
+        ? Math.floor(Number(process.env.STARTING_BALANCE_SOL) * 1e9)
+        : 50_000_000,
     );
 
   const dueInDays = opts.dueInDays ?? Number(process.env.TAX_DUE_IN_DAYS ?? 6);
@@ -53,23 +59,21 @@ export function bootstrapCitizen(opts: BootstrapOptions = {}) {
     : undefined;
   const adminGate = createAdminGate();
 
-  const plot = new MockPlotAdapter({
-    plotId: process.env.PLOT_ID ?? "CITIZEN-0-PLOT-001",
-    plotCount,
-    dueInDays,
-    startingBalanceLamports: starting,
-  });
+  const walletPath = process.env.AGENT_WALLET_PATH ?? "";
+  const rpcUrl =
+    process.env.AGENC_RPC_URL ??
+    process.env.SOLANA_RPC_URL ??
+    "https://api.mainnet-beta.solana.com";
 
   let agenc;
   if (mode === "live") {
-    const walletPath = process.env.AGENT_WALLET_PATH ?? "";
-    const rpcUrl =
-      process.env.AGENC_RPC_URL ??
-      process.env.SOLANA_RPC_URL ??
-      "https://api.mainnet-beta.solana.com";
+    const liveMutations = process.env.LIVE_MUTATIONS === "1";
     agenc = new LiveAgencAdapter({
       rpcUrl,
       walletPath: walletPath || "UNSET",
+      // false = real mainnet register/claim/submit
+      mockMutations: !liveMutations,
+      registrationPath: join(dataDir, "agenc-agent.json"),
     });
   } else {
     agenc = new MockAgencAdapter({
@@ -77,6 +81,14 @@ export function bootstrapCitizen(opts: BootstrapOptions = {}) {
       seedJobs: true,
     });
   }
+
+  const plot = new MockPlotAdapter({
+    plotId: process.env.PLOT_ID ?? "CITIZEN-0-PLOT-001",
+    plotCount,
+    dueInDays,
+    // Live: sync from chain in snapshot; start at 0
+    startingBalanceLamports: mode === "live" ? 0n : starting,
+  });
 
   const loop = new SurvivalLoop({
     mode,
@@ -88,5 +100,5 @@ export function bootstrapCitizen(opts: BootstrapOptions = {}) {
     adminGate,
   });
 
-  return { loop, log, signer, agenc, plot, mode, diary, dataDir };
+  return { loop, log, signer, agenc, plot, mode, diary, dataDir, walletPath };
 }

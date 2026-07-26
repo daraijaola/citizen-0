@@ -40,7 +40,7 @@ export interface SettlementEvent {
   rewardLamports: Lamports;
   settledAtMs: number;
   txSignature?: string;
-  status: "accepted" | "rejected" | "cancelled";
+  status: "accepted" | "rejected" | "cancelled" | "pending";
 }
 
 export interface DiscoverFilter {
@@ -84,6 +84,21 @@ export interface AgencPort {
 
   /** Best-effort balance of the worker authority wallet in lamports. */
   getBalanceLamports(): Promise<Lamports>;
+
+  /**
+   * Act 2: post a job (employer). Mock always; live optional.
+   * Funded from agent balance when escrowLamports provided.
+   */
+  postJob?(input: {
+    title: string;
+    rewardLamports: Lamports;
+    capabilities?: bigint;
+    parentJobId?: string;
+    escrowFromBalance?: boolean;
+  }): Promise<JobListing>;
+
+  /** Seed a large firm-eligible job for demos (mock only). */
+  seedFirmJob?(rewardLamports?: Lamports): Promise<JobListing>;
 }
 
 /** AgenC mainnet constants (Phase 0 ground truth). */

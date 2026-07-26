@@ -78,8 +78,23 @@ Judges building the platform know what’s live. We label it plainly.
 | Real parcel mint / on-chain tax pay | **Not wired** (Nexus UI has buy/pay; no public API) |
 | Admin approve-gate (human click) | **Optional** (`TELEGRAM_ADMIN_GATE=1`); default charter auto-approve within limits |
 | LLM job workers | **Optional**; deterministic specialists run without a key |
+| Firm mode (decompose / child escrow / margin) | **Mock adapter** — full Act 2 path offline |
+| Society (CITIZEN-1/2 plots + tax) | **In-process workers** — narrative + state machine, not separate agent processes |
+| Second plot purchase | **Mock ledger** (no real parcel mint) |
 
 **Design rule:** one adapter interface. Mock and live implement the same port. README stays honest when mainnet claim is flipped on.
+
+---
+
+## Acts (Phase 4–5)
+
+| Act | Unlock | Behavior |
+|-----|--------|----------|
+| **1 Survival** | Always | Claim jobs, pay tax, protect plot |
+| **2 Prosperity** | Coverage ≥ 3× next tax + COMFORTABLE | Decompose large jobs → child escrows → hire workers → keep ~25% margin |
+| **3 Society** | Firm unlocked + coverage ≥ 4× | Spawn **CITIZEN-1** / **CITIZEN-2** with tiny plots; they earn wages and pay city tax |
+
+Resident Record section **Firm & society** shows act, P&L, and population live from `state.economy`.
 
 ---
 
@@ -168,7 +183,7 @@ Ground truth constants (Phase 0):
 | 1 | Foundations | Done |
 | 2 | Survival loop hardening | Done |
 | 3 | Telegram + Resident Record | Done |
-| 4–5 | Prosperity / society (stretch) | Not started |
+| 4–5 | Prosperity / society (stretch) | Done (mock firm + CITIZEN-1/2) |
 | 6 | Soak, demo video, submission form | In progress |
 
 ---

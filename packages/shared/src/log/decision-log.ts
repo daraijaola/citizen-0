@@ -26,6 +26,12 @@ export type DecisionEventType =
   | "RETRY"
   | "CIRCUIT"
   | "SUPERVISOR"
+  | "FIRM_UNLOCK"
+  | "FIRM_JOB"
+  | "SUBCONTRACT"
+  | "SOCIETY_SPAWN"
+  | "WORKER_TAX"
+  | "SECOND_PLOT"
   | "ERROR"
   | "DIARY";
 

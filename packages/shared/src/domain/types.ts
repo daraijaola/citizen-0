@@ -104,6 +104,10 @@ export interface JobListing {
   jobSpecHash: string | null;
   claimable: boolean;
   source: "agenc" | "mock";
+  /** Act 2: parent job id if this is a child subcontract. */
+  parentJobId?: string;
+  /** Act 2: true when job is large enough for firm decomposition. */
+  firmEligible?: boolean;
   raw?: unknown;
 }
 
@@ -129,12 +133,19 @@ export interface JobAttempt {
   artifactSha256?: string;
   resultUri?: string;
   error?: string;
+  /** Act 2 firm job */
+  firmMode?: boolean;
+  childJobIds?: string[];
+  marginLamports?: Lamports;
+  paidToWorkersLamports?: Lamports;
 }
 
-/** Capability bitmask: AgenC uses 1n = COMPUTE. */
+/** Capability bitmask: AgenC uses 1n = COMPUTE, 2n = GENERAL. */
 export const CAPABILITY = {
   COMPUTE: 1n,
   GENERAL: 2n,
+  /** Worker default — claim both COMPUTE and GENERAL mainnet jobs. */
+  ALL: 3n,
 } as const;
 
 export interface CitizenIdentity {
@@ -144,6 +155,39 @@ export interface CitizenIdentity {
   authorityWallet?: string;
   mode: RuntimeMode;
   createdAtMs: UnixMs;
+}
+
+/** Act 2/3 economy snapshot for FE + diary. */
+export interface EconomySnapshot {
+  act: "SURVIVAL" | "PROSPERITY" | "SOCIETY";
+  firmMode: boolean;
+  firmUnlockedAtMs?: UnixMs;
+  societySpawned: boolean;
+  secondPlot?: PlotRegistryEntry;
+  firm: {
+    parentJobsCompleted: number;
+    childrenHired: number;
+    grossRewardLamports: string;
+    paidToWorkersLamports: string;
+    marginKeptLamports: string;
+    secondPlotPurchased: boolean;
+  };
+  population: {
+    count: number;
+    active: number;
+    totalBalanceLamports: string;
+    totalTaxesPaidLamports: string;
+    totalJobsCompleted: number;
+    citizens: Array<{
+      citizenId: string;
+      balanceLamports: string;
+      status: string;
+      jobsCompleted: number;
+      taxesPaidLamports: string;
+      plotId: string;
+      stage: string;
+    }>;
+  };
 }
 
 export interface CitizenState {
@@ -156,4 +200,6 @@ export interface CitizenState {
   attempts: JobAttempt[];
   lastTickAtMs: UnixMs;
   tickCount: number;
+  /** Act 2/3 */
+  economy?: EconomySnapshot;
 }

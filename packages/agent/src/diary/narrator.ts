@@ -141,4 +141,54 @@ export const Narrator = {
       { kind, status, reasons },
     );
   },
+
+  firmUnlock(coverage: number): DiaryEntry {
+    return entry(
+      "firm_unlock",
+      `Coverage ${coverage.toFixed(2)}× tax. Unlocking firm mode. I'm not just surviving — I can hire.`,
+      "proud",
+      { coverage },
+    );
+  },
+
+  firmJob(
+    title: string,
+    children: number,
+    marginSol: number,
+    paidWorkersSol: number,
+  ): DiaryEntry {
+    return entry(
+      "firm_job",
+      `Firm job done: "${title}". Hired ${children} subtasks, paid workers ~${paidWorkersSol.toFixed(4)} SOL, kept margin ~${marginSol.toFixed(4)} SOL. Labor → capital.`,
+      "proud",
+      { title, children, marginSol, paidWorkersSol },
+    );
+  },
+
+  societySpawn(ids: string[]): DiaryEntry {
+    return entry(
+      "society_spawn",
+      `Society boot. Born: ${ids.join(", ")}. Each gets a tiny plot and rent. The city just got denser.`,
+      "proud",
+      { ids },
+    );
+  },
+
+  workerTax(citizenId: string, amountSol: number): DiaryEntry {
+    return entry(
+      "worker_tax",
+      `${citizenId} paid the city ~${amountSol.toFixed(6)} SOL tax. Aggregate flywheel turning.`,
+      "relieved",
+      { citizenId, amountSol },
+    );
+  },
+
+  secondPlot(plotId: string): DiaryEntry {
+    return entry(
+      "second_plot",
+      `Second plot acquired: ${plotId}. Surplus bought me more skin in the city.`,
+      "proud",
+      { plotId },
+    );
+  },
 };

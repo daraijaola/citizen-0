@@ -40,4 +40,7 @@ export interface PlotPort {
 
   /** Credit balance (mock settlement / faucet). Live no-ops or throws. */
   creditLamports?(amount: bigint, reason: string): Promise<void>;
+
+  /** Debit balance (wages, seed capital). Mock only unless wired. */
+  debitLamports?(amount: bigint, reason: string): Promise<void>;
 }
