@@ -1,0 +1,39 @@
+# CITIZEN-0 reproducible demo
+#
+#   docker compose -f demo/docker-compose.demo.yml up --build
+#   open http://localhost:3030
+#
+# Port 3030 is deliberate: the production Resident Record runs on 3010 and
+# another service holds 3020, so binding those would collide with the live
+# deployment. Override with DEMO_PORT if 3030 is taken on your machine.
+#
+# agent  -> runs the seeded mock economy, writes state to the shared volume
+# record -> serves the public Resident Record UI reading that same state
+services:
+  agent:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile
+    image: citizen-0-demo:latest
+    env_file: scenario.env
+    volumes:
+      - demo-state:/data
+    # Run the full arc once, then idle so the record stays inspectable.
+    command: >
+      sh -c "npm run agent:loop && echo '--- demo arc complete; record is live on :3030 ---' && tail -f /dev/null"
+
+  record:
+    image: citizen-0-demo:latest
+    depends_on:
+      agent:
+        condition: service_started
+    env_file: scenario.env
+    environment:
+      NEXT_BASE_PATH: ""
+    ports:
+      - "${DEMO_PORT:-3030}:3000"
+    volumes:
+      - demo-state:/data
+
+volumes:
+  demo-state:
