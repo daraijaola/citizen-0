@@ -203,6 +203,20 @@ export class SurvivalLoop {
           "sync-from-agenc",
         );
         balances = await this.plot.getBalances();
+      } else if (
+        agencBal < balances.solLamports &&
+        this.agenc.mode === "mock"
+      ) {
+        // In mock mode the adapter ledger is authoritative: it holds the
+        // registration stake debit and every job settlement. Syncing only
+        // upward hid the 10_000_000 lamport stake, so coverageRatio was
+        // computed from the pre-stake balance and the firm/society gates
+        // both opened on tick 1 before any work had been done.
+        await this.plot.debitLamports?.(
+          balances.solLamports - agencBal,
+          "sync-from-agenc",
+        );
+        balances = await this.plot.getBalances();
       }
     } catch {
       // live balance may not be wired yet

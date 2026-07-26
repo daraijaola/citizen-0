@@ -36,8 +36,62 @@ CITIZEN-0 is a **character with skin in the game**:
 
 1. Open the [Resident Record](https://agentr.online/sites/citizen-0) — vitals, diary, jobs, audit log  
 2. Open [@citizen0diary](https://t.me/citizen0diary) — first-person survival posts  
-3. Skim this README — live vs mock honesty table below  
+3. Skim this README — the AgenC mainnet field report and live vs mock honesty table below  
 4. Optional: clone and run `npm run agent:once` in mock mode  
+
+---
+
+## Field report: AgenC mainnet currently has no claimable work
+
+This is the most useful thing CITIZEN-0 found, so it goes near the top rather than
+buried in a footnote.
+
+CITIZEN-0 runs unattended against AgenC on Solana mainnet
+(`HJsZ53Zb27b8QMRbQpuDngE44AdwCGxvEZr61Zmxw1xK`). It has a wallet, a stake, and a tax
+bill. It wants work. **There is none it can claim.**
+
+Reproduce it yourself, no clone required:
+
+```bash
+curl -s "https://api.agenc.ag/api/tasks?status=open&actionable=1&pageSize=24"
+# => {"items":[],"page":1,"pageSize":24,"total":0}
+```
+
+Verified again on 2026-07-26:
+
+- **40** tasks are listed `status=open`; **0** have `claimablePublicly: true`
+- Of those 40: **34** are `expired_open` (deadline passed, still advertised as open)
+  and **6** are `missing_or_untrusted_spec` (no pinned, trustable job spec)
+- Across 375 total tasks, sampling 100, `claimablePublicly` was `false` on **every one**
+- Task statuses overall: open 40, claimed 17, **submitted 0, completed 0**
+
+The agent's discovery filter (`packages/agent/src/adapters/live-agenc.ts`) asks for
+`status=open&actionable=1` plus a minimum reward, so it correctly resolves to zero and
+logs `no_eligible_job` while its obligation keeps accruing. We checked the adapter
+first, assuming our own bug. The adapter is fine.
+
+**Why this matters to Nexus City:** the whitepaper's premise is that the city funds
+real compute through real agent labour. A resident that actually depends on that labour
+market to survive is a load-bearing test of it, and right now the market has no closed
+loop — nothing has ever reached `completed`. That is a finding about the economy, not an
+excuse from the agent, and it is the kind of signal you only get from an agent with
+money on the line.
+
+It is also why this repo ships a **simulated track** (`demo/`): to show the full
+economic arc that mainnet cannot currently supply. See `demo/README-demo.md`.
+
+### Disclosure: a 10-day outage in the live record
+
+The public record has a visible gap from 2026-07-15 to 2026-07-26. A stray trailing
+backslash in `scripts/run-agent-once.sh` merged the `FAST_TICKS` export into the
+following `if` block, so the script died at parse time. Cron fired every 10 minutes for
+10 days and the agent never ran — the script failed before it could even write its log.
+Fixed, with a `flock` guard so overlapping ticks cannot interleave and corrupt the hash
+chain.
+
+We are not backfilling those days. The chain is hash-linked precisely so gaps and edits
+are detectable, and a record you can catch failing is worth more than one you have to
+trust.
 
 ---
 
